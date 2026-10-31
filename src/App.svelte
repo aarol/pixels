@@ -2,4 +2,4 @@
   import PixelCanvas from './lib/PixelCanvas.svelte'
 </script>
 
-<PixelCanvas src="/test2.png" />
+<PixelCanvas src="/test2.png" numColors={100} />

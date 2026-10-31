@@ -1,17 +1,26 @@
 <script lang="ts">
-  let { src }: { src: string } = $props()
+  import { quantize, type Rgb } from './quantize'
+
+  // numColors is expected to be between 10 and 500.
+  let { src, numColors }: { src: string; numColors: number } = $props()
 
   const MAX_CELL = 80
   const PAD = 24
   const KEEP_VISIBLE = 64
   const GRID_COLOR = '#c8c8c8'
   const GRID_WIDTH = 1
-  const GRID_MIN_CELL = 3
+  const GRID_FADE_START = 3
+  const GRID_FADE_END = 7
+  const NUMBER_FADE_START = 10
+  const NUMBER_FADE_END = 15
+  const MAX_TILE = 256
 
   let container: HTMLDivElement
   let canvas: HTMLCanvasElement
 
   let source: HTMLCanvasElement | null = null
+  let palette: Rgb[] = []
+  let indices: Uint16Array = new Uint16Array(0)
   let imgW = 0
   let imgH = 0
 
@@ -68,6 +77,73 @@
     if (!raf) raf = requestAnimationFrame(draw)
   }
 
+  // Text is expensive, so each color's number is rendered once into a small
+  // transparent tile and then blitted for every cell of that color. Tiles are
+  // created lazily and rebuilt when the zoom moves to a different size bucket.
+  const tiles = new Map<number, HTMLCanvasElement>()
+  let tileSize = 0
+
+  function makeTile(index: number, size: number) {
+    const tile = document.createElement('canvas')
+    tile.width = size
+    tile.height = size
+    const t = tile.getContext('2d')!
+
+    const { r, g, b } = palette[index]
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b
+    const label = String(index + 1)
+
+    let fontSize = size * 0.5
+    t.font = `${fontSize}px system-ui, sans-serif`
+    const width = t.measureText(label).width
+    if (width > size * 0.8) {
+      fontSize *= (size * 0.8) / width
+      t.font = `${fontSize}px system-ui, sans-serif`
+    }
+
+    const m = t.measureText(label)
+    t.fillStyle = luma > 140 ? '#000' : '#fff'
+    t.textAlign = 'center'
+    t.textBaseline = 'alphabetic'
+    t.fillText(label, size / 2, size / 2 + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2)
+    return tile
+  }
+
+  function drawNumbers(
+    ctx: CanvasRenderingContext2D,
+    x0: number, y0: number, x1: number, y1: number,
+    s: number, ox: number, oy: number,
+  ) {
+    const alpha = clamp((scale - NUMBER_FADE_START) / (NUMBER_FADE_END - NUMBER_FADE_START), 0, 1)
+    if (alpha <= 0 || palette.length === 0) return
+
+    let want = 16
+    while (want < s && want < MAX_TILE) want *= 2
+    if (want !== tileSize) {
+      tiles.clear()
+      tileSize = want
+    }
+
+    ctx.globalAlpha = alpha
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    for (let y = y0; y < y1; y++) {
+      const dy = Math.round(oy + y * s)
+      const dh = Math.round(oy + (y + 1) * s) - dy
+      for (let x = x0; x < x1; x++) {
+        const index = indices[y * imgW + x]
+        let tile = tiles.get(index)
+        if (!tile) {
+          tile = makeTile(index, tileSize)
+          tiles.set(index, tile)
+        }
+        const dx = Math.round(ox + x * s)
+        ctx.drawImage(tile, dx, dy, Math.round(ox + (x + 1) * s) - dx, dh)
+      }
+    }
+    ctx.globalAlpha = 1
+  }
+
   function draw() {
     raf = 0
     const ctx = canvas.getContext('2d')
@@ -76,6 +152,7 @@
     const W = canvas.width
     const H = canvas.height
     ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.globalAlpha = 1
     ctx.fillStyle = '#fff'
     ctx.fillRect(0, 0, W, H)
     if (!source) return
@@ -97,9 +174,12 @@
       ox + x0 * s, oy + y0 * s, (x1 - x0) * s, (y1 - y0) * s,
     )
 
-    // Border is a constant GRID_WIDTH css px at every zoom level; it's only
-    // hidden when cells get too small for it to be useful.
-    if (scale < GRID_MIN_CELL) return
+    drawNumbers(ctx, x0, y0, x1, y1, s, ox, oy)
+
+    // Border is a constant GRID_WIDTH css px at every zoom level; it fades out
+    // as cells shrink so tiny cells aren't swamped by lines.
+    const alpha = clamp((scale - GRID_FADE_START) / (GRID_FADE_END - GRID_FADE_START), 0, 1)
+    if (alpha <= 0) return
 
     const lw = Math.max(1, Math.round(GRID_WIDTH * dpr))
     const half = Math.floor(lw / 2)
@@ -108,6 +188,7 @@
     const left = Math.round(ox + x0 * s)
     const right = Math.round(ox + x1 * s)
 
+    ctx.globalAlpha = alpha
     ctx.fillStyle = GRID_COLOR
     for (let i = x0; i <= x1; i++) {
       ctx.fillRect(Math.round(ox + i * s) - half, top - half, lw, bottom - top + lw)
@@ -162,30 +243,50 @@
     }
   })
 
+  let original = $state.raw<ImageData | null>(null)
+
   $effect(() => {
-    const url = src
     const img = new Image()
     let cancelled = false
 
     img.onload = () => {
       if (cancelled) return
-      imgW = img.naturalWidth
-      imgH = img.naturalHeight
       const off = document.createElement('canvas')
-      off.width = imgW
-      off.height = imgH
-      off.getContext('2d')!.drawImage(img, 0, 0)
-      source = off
-      fitted = false
-      if (viewW > 0) {
-        fit()
-        schedule()
-      }
+      off.width = img.naturalWidth
+      off.height = img.naturalHeight
+      const octx = off.getContext('2d')!
+      octx.drawImage(img, 0, 0)
+      original = octx.getImageData(0, 0, off.width, off.height)
     }
-    img.src = url
+    img.src = src
 
     return () => {
       cancelled = true
+    }
+  })
+
+  $effect(() => {
+    if (!original) return
+    const quantized = quantize(original, numColors)
+    const pixels = quantized.image
+
+    const off = document.createElement('canvas')
+    off.width = pixels.width
+    off.height = pixels.height
+    off.getContext('2d')!.putImageData(pixels, 0, 0)
+
+    palette = quantized.palette
+    indices = quantized.indices
+    tiles.clear()
+
+    const sizeChanged = pixels.width !== imgW || pixels.height !== imgH
+    imgW = pixels.width
+    imgH = pixels.height
+    source = off
+    if (sizeChanged) fitted = false
+    if (viewW > 0) {
+      if (!fitted) fit()
+      schedule()
     }
   })
 
