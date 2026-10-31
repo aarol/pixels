@@ -15,20 +15,24 @@
   const MAX_CELL = 80
   const PAD = 24
   const KEEP_VISIBLE = 64
-  const UNFILLED_COLOR = '#e8e8e8'
-  const HIGHLIGHT_COLOR = '#cfcfcf'
+  const UNFILLED_RGB = [0xe8, 0xe8, 0xe8] as const
+  const HIGHLIGHT_RGB = [0xcf, 0xcf, 0xcf] as const
   const GRID_COLOR = '#c8c8c8'
   const GRID_WIDTH = 1
+  const GRID_RES = 4
   const GRID_FADE_START = 3
   const GRID_FADE_END = 7
-  const NUMBER_FADE_START = 10
-  const NUMBER_FADE_END = 15
+  const NUMBER_FADE_START = 16
+  const NUMBER_FADE_END = 22
+  const TEXT_RES = 48
 
   let container: HTMLDivElement
   let canvas: HTMLCanvasElement
 
   let source: HTMLCanvasElement | null = null
   let sourceCtx: CanvasRenderingContext2D | null = null
+  let gridLayer: HTMLCanvasElement | null = null
+  let surfaceData: ImageData | null = null
   let indices: Uint16Array = new Uint16Array(0)
   let filled: Uint8Array = new Uint8Array(0)
   let colorCells: Uint32Array[] = []
@@ -89,13 +93,27 @@
     if (!raf) raf = requestAnimationFrame(draw)
   }
 
-  // Text is expensive, so each color's number is rendered once into a small
-  // transparent tile and then blitted for every cell of that color. Tiles are
-  // created lazily and rebuilt when the cell size changes by a whole pixel.
+  // Each color's number is rendered once into a fixed TEXT_RES×TEXT_RES tile,
+  // and cached in `detailCanvas` for a padded window of cells around the
+  // viewport. Panning and zooming within that window only takes a single
+  // drawImage call, and zooming never rebuilds text tiles.
   const tiles = new Map<number, HTMLCanvasElement>()
-  let tileSize = 0
+  let detailCanvas: HTMLCanvasElement | null = null
+  let detailCtx: CanvasRenderingContext2D | null = null
+  let detailX0 = 0
+  let detailY0 = 0
+  let detailX1 = 0
+  let detailY1 = 0
 
-  function makeTile(index: number, size: number) {
+  function invalidateDetail() {
+    detailX0 = 0
+    detailY0 = 0
+    detailX1 = 0
+    detailY1 = 0
+  }
+
+  function makeTile(index: number) {
+    const size = TEXT_RES
     const tile = document.createElement('canvas')
     tile.width = size
     tile.height = size
@@ -119,39 +137,66 @@
     return tile
   }
 
-  function drawNumbers(
-    ctx: CanvasRenderingContext2D,
-    x0: number, y0: number, x1: number, y1: number,
-    s: number, ox: number, oy: number,
-  ) {
-    const alpha = clamp((scale - NUMBER_FADE_START) / (NUMBER_FADE_END - NUMBER_FADE_START), 0, 1)
-    if (alpha <= 0 || palette.length === 0) return
-
-    // Tiles are rendered at exactly the cell's size in device pixels and
-    // blitted 1:1 at whole-pixel positions, so text is never resampled.
-    const size = Math.max(1, Math.round(s))
-    if (size !== tileSize) {
-      tiles.clear()
-      tileSize = size
+  function ensureDetailWindow(vx0: number, vy0: number, vx1: number, vy1: number) {
+    if (
+      detailCanvas &&
+      vx0 >= detailX0 &&
+      vy0 >= detailY0 &&
+      vx1 <= detailX1 &&
+      vy1 <= detailY1
+    ) {
+      return
     }
 
-    ctx.globalAlpha = alpha
-    ctx.imageSmoothingEnabled = false
-    for (let y = y0; y < y1; y++) {
-      const dy = Math.round(oy + (y + 0.5) * s - size / 2)
-      for (let x = x0; x < x1; x++) {
-        const i = y * imgW + x
+    const padX = Math.max(8, ((vx1 - vx0) >> 1) + 4)
+    const padY = Math.max(8, ((vy1 - vy0) >> 1) + 4)
+    const nx0 = clamp(vx0 - padX, 0, imgW)
+    const ny0 = clamp(vy0 - padY, 0, imgH)
+    const nx1 = clamp(vx1 + padX, 0, imgW)
+    const ny1 = clamp(vy1 + padY, 0, imgH)
+    const cw = nx1 - nx0
+    const ch = ny1 - ny0
+    if (cw <= 0 || ch <= 0) return
+
+    if (!detailCanvas) {
+      detailCanvas = document.createElement('canvas')
+      detailCtx = detailCanvas.getContext('2d')!
+    }
+    const reqW = cw * TEXT_RES
+    const reqH = ch * TEXT_RES
+    if (detailCanvas.width !== reqW || detailCanvas.height !== reqH) {
+      detailCanvas.width = reqW
+      detailCanvas.height = reqH
+    } else {
+      detailCtx!.clearRect(0, 0, reqW, reqH)
+    }
+
+    const dctx = detailCtx!
+    for (let y = ny0; y < ny1; y++) {
+      const row = y * imgW
+      const dy = (y - ny0) * TEXT_RES
+      for (let x = nx0; x < nx1; x++) {
+        const i = row + x
         if (filled[i]) continue
-        const index = indices[i]
-        let tile = tiles.get(index)
+        const colorIdx = indices[i]
+        let tile = tiles.get(colorIdx)
         if (!tile) {
-          tile = makeTile(index, size)
-          tiles.set(index, tile)
+          tile = makeTile(colorIdx)
+          tiles.set(colorIdx, tile)
         }
-        ctx.drawImage(tile, Math.round(ox + (x + 0.5) * s - size / 2), dy)
+        dctx.drawImage(tile, (x - nx0) * TEXT_RES, dy)
       }
     }
-    ctx.globalAlpha = 1
+
+    detailX0 = nx0
+    detailY0 = ny0
+    detailX1 = nx1
+    detailY1 = ny1
+  }
+
+  function clearDetailCell(x: number, y: number) {
+    if (!detailCtx || x < detailX0 || x >= detailX1 || y < detailY0 || y >= detailY1) return
+    detailCtx.clearRect((x - detailX0) * TEXT_RES, (y - detailY0) * TEXT_RES, TEXT_RES, TEXT_RES)
   }
 
   function draw() {
@@ -177,6 +222,7 @@
     const y1 = clamp(Math.ceil((H - oy) / s), 0, imgH)
     if (x1 <= x0 || y1 <= y0) return
 
+    // Layer 1: precomputed whole-canvas colors (unfilled, highlighted, painted)
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(
       source,
@@ -184,12 +230,47 @@
       ox + x0 * s, oy + y0 * s, (x1 - x0) * s, (y1 - y0) * s,
     )
 
-    drawNumbers(ctx, x0, y0, x1, y1, s, ox, oy)
+    const gridAlpha = clamp((scale - GRID_FADE_START) / (GRID_FADE_END - GRID_FADE_START), 0, 1)
+    if (gridAlpha <= 0) return
 
-    // Border is a constant GRID_WIDTH css px at every zoom level; it fades out
-    // as cells shrink so tiny cells aren't swamped by lines.
-    const alpha = clamp((scale - GRID_FADE_START) / (GRID_FADE_END - GRID_FADE_START), 0, 1)
-    if (alpha <= 0) return
+    const numAlpha = clamp((scale - NUMBER_FADE_START) / (NUMBER_FADE_END - NUMBER_FADE_START), 0, 1)
+
+    // Layer 2: middle zoom — whole grid pre-rendered to an offscreen canvas at
+    // fixed resolution (GRID_RES px/cell), blitted in a single drawImage call.
+    if (numAlpha <= 0) {
+      if (gridLayer) {
+        ctx.globalAlpha = gridAlpha
+        ctx.imageSmoothingEnabled = true
+        ctx.drawImage(
+          gridLayer,
+          x0 * GRID_RES, y0 * GRID_RES, (x1 - x0) * GRID_RES, (y1 - y0) * GRID_RES,
+          ox + x0 * s, oy + y0 * s, (x1 - x0) * s, (y1 - y0) * s,
+        )
+        ctx.globalAlpha = 1
+      }
+      return
+    }
+
+    // Layer 3: close zoom — generates a single-resolution text canvas only for
+    // a padded region around the viewport, and draws crisp grid lines.
+    if (palette.length > 0) {
+      ensureDetailWindow(x0, y0, x1, y1)
+      if (detailCanvas && detailX1 > detailX0 && detailY1 > detailY0) {
+        ctx.globalAlpha = numAlpha
+        ctx.imageSmoothingEnabled = true
+        ctx.drawImage(
+          detailCanvas,
+          (x0 - detailX0) * TEXT_RES,
+          (y0 - detailY0) * TEXT_RES,
+          (x1 - x0) * TEXT_RES,
+          (y1 - y0) * TEXT_RES,
+          ox + x0 * s,
+          oy + y0 * s,
+          (x1 - x0) * s,
+          (y1 - y0) * s,
+        )
+      }
+    }
 
     const lw = Math.max(1, Math.round(GRID_WIDTH * dpr))
     const half = Math.floor(lw / 2)
@@ -198,7 +279,7 @@
     const left = Math.round(ox + x0 * s)
     const right = Math.round(ox + x1 * s)
 
-    ctx.globalAlpha = alpha
+    ctx.globalAlpha = gridAlpha
     ctx.fillStyle = GRID_COLOR
     for (let i = x0; i <= x1; i++) {
       ctx.fillRect(Math.round(ox + i * s) - half, top - half, lw, bottom - top + lw)
@@ -206,6 +287,7 @@
     for (let j = y0; j <= y1; j++) {
       ctx.fillRect(left - half, Math.round(oy + j * s) - half, right - left + lw, lw)
     }
+    ctx.globalAlpha = 1
   }
 
   function resize() {
@@ -295,26 +377,35 @@
     if (storageKey) saveProgress(storageKey, filled)
   }
 
-  function fillUnfilled(colorIdx: number, color: string) {
-    if (!sourceCtx) return
+  function fillUnfilled(colorIdx: number, rgb: readonly [number, number, number]) {
+    if (!surfaceData) return false
     const cells = colorCells[colorIdx]
-    if (!cells) return
-    sourceCtx.fillStyle = color
+    if (!cells) return false
+    const data = surfaceData.data
+    const [r, g, b] = rgb
     for (let k = 0; k < cells.length; k++) {
       const i = cells[k]
       if (!filled[i]) {
-        sourceCtx.fillRect(i % imgW, (i / imgW) | 0, 1, 1)
+        const p = i * 4
+        data[p] = r
+        data[p + 1] = g
+        data[p + 2] = b
       }
     }
+    return true
   }
 
   $effect(() => {
     const next = selected
-    if (!sourceCtx || next === highlighted) return
-    if (highlighted !== null) fillUnfilled(highlighted, UNFILLED_COLOR)
-    if (next !== null) fillUnfilled(next, HIGHLIGHT_COLOR)
+    if (!sourceCtx || !surfaceData || next === highlighted) return
+    let dirty = false
+    if (highlighted !== null) dirty = fillUnfilled(highlighted, UNFILLED_RGB) || dirty
+    if (next !== null) dirty = fillUnfilled(next, HIGHLIGHT_RGB) || dirty
     highlighted = next
-    schedule()
+    if (dirty) {
+      sourceCtx.putImageData(surfaceData, 0, 0)
+      schedule()
+    }
   })
 
   $effect(() => {
@@ -340,8 +431,15 @@
     off.width = w
     off.height = h
     const octx = off.getContext('2d')!
-    octx.fillStyle = UNFILLED_COLOR
-    octx.fillRect(0, 0, w, h)
+    const sData = new ImageData(w, h)
+    const buf = sData.data
+    const [ur, ug, ub] = UNFILLED_RGB
+    for (let p = 0; p < buf.length; p += 4) {
+      buf[p] = ur
+      buf[p + 1] = ug
+      buf[p + 2] = ub
+      buf[p + 3] = 255
+    }
 
     const currentFilled = new Uint8Array(idx.length)
 
@@ -351,41 +449,56 @@
     colorCells = cells
     highlighted = null
     storageKey = key
-    tiles.clear()
+    surfaceData = sData
 
     const sizeChanged = w !== imgW || h !== imgH
+    if (sizeChanged || !gridLayer) {
+      const gOff = document.createElement('canvas')
+      gOff.width = w * GRID_RES
+      gOff.height = h * GRID_RES
+      const gctx = gOff.getContext('2d')!
+      gctx.fillStyle = GRID_COLOR
+      for (let i = 0; i <= w; i++) {
+        gctx.fillRect(i === w ? w * GRID_RES - 1 : i * GRID_RES, 0, 1, h * GRID_RES)
+      }
+      for (let j = 0; j <= h; j++) {
+        gctx.fillRect(0, j === h ? h * GRID_RES - 1 : j * GRID_RES, w * GRID_RES, 1)
+      }
+      gridLayer = gOff
+    }
     imgW = w
     imgH = h
     source = off
     sourceCtx = octx
+    tiles.clear()
+    invalidateDetail()
+    const sel = untrack(() => selected)
+    if (sel !== null) {
+      fillUnfilled(sel, HIGHLIGHT_RGB)
+      highlighted = sel
+    }
+    octx.putImageData(sData, 0, 0)
     if (sizeChanged) fitted = false
     if (viewW > 0) {
       if (!fitted) fit()
       schedule()
     }
-    if (untrack(() => selected) !== null) {
-      const sel = untrack(() => selected)!
-      fillUnfilled(sel, HIGHLIGHT_COLOR)
-      highlighted = sel
-    }
 
     let cancelled = false
     loadProgress(key).then((saved) => {
       if (cancelled || !saved || saved.length !== currentFilled.length) return
-      const imgData = octx.getImageData(0, 0, w, h)
-      const data = imgData.data
       const qData = pixels.data
       for (let i = 0; i < saved.length; i++) {
         if (saved[i]) {
           currentFilled[i] = 1
           const p = i * 4
-          data[p] = qData[p]
-          data[p + 1] = qData[p + 1]
-          data[p + 2] = qData[p + 2]
-          data[p + 3] = 255
+          buf[p] = qData[p]
+          buf[p + 1] = qData[p + 1]
+          buf[p + 2] = qData[p + 2]
         }
       }
-      octx.putImageData(imgData, 0, 0)
+      octx.putImageData(sData, 0, 0)
+      invalidateDetail()
       schedule()
     })
 
@@ -412,12 +525,17 @@
   }
 
   function paintCell(cell: { x: number; y: number; i: number }) {
-    if (selected === null || indices[cell.i] !== selected || !sourceCtx || filled[cell.i]) return false
+    if (selected === null || indices[cell.i] !== selected || !sourceCtx || !surfaceData) return false
     if (!filled[cell.i]) {
       filled[cell.i] = 1
       const c = palette[selected]
+      const p = cell.i * 4
+      surfaceData.data[p] = c.r
+      surfaceData.data[p + 1] = c.g
+      surfaceData.data[p + 2] = c.b
       sourceCtx.fillStyle = `rgb(${c.r} ${c.g} ${c.b})`
       sourceCtx.fillRect(cell.x, cell.y, 1, 1)
+      clearDetailCell(cell.x, cell.y)
       schedule()
       queueSave()
     }

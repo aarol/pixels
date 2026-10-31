@@ -7,5 +7,5 @@
   let selected = $state<number | null>(null)
 </script>
 
-<PixelCanvas src="/test2.png" numColors={100} bind:palette {selected} />
+<PixelCanvas src="/place2022.png" numColors={100} bind:palette {selected} />
 <Palette {palette} bind:selected />
