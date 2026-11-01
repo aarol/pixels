@@ -1,6 +1,7 @@
 type Entry = { r: number; g: number; b: number; n: number }
 
 const CHANNELS = ['r', 'g', 'b'] as const
+const MIN_BOX_RANGE = 16
 
 function range(box: Entry[]) {
   let best: (typeof CHANNELS)[number] = 'r'
@@ -69,7 +70,7 @@ export function quantize(image: ImageData, numColors: number): Quantized {
   const boxes: Entry[][] = [[...counts.values()]]
   while (boxes.length < k) {
     let target = -1
-    let targetSize = 0
+    let targetSize = MIN_BOX_RANGE - 1
     let targetChannel: (typeof CHANNELS)[number] = 'r'
     boxes.forEach((box, i) => {
       if (box.length < 2) return
@@ -92,10 +93,40 @@ export function quantize(image: ImageData, numColors: number): Quantized {
       split = i + 1
       if (acc >= total / 2) break
     }
+    while (
+      split < box.length &&
+      box[split][targetChannel] === box[split - 1][targetChannel]
+    ) {
+      split++
+    }
+    if (split === box.length) {
+      split = 1
+      while (box[split][targetChannel] === box[0][targetChannel]) split++
+    }
     boxes.splice(target, 1, box.slice(0, split), box.slice(split))
   }
 
-  const palette = boxes.map(average)
+  let palette = boxes.map(average)
+  while (palette.length > 1) {
+    let bestI = -1
+    let bestJ = -1
+    let bestDist = MIN_BOX_RANGE ** 2
+    for (let i = 0; i < palette.length; i++) {
+      for (let j = i + 1; j < palette.length; j++) {
+        const a = palette[i]
+        const b = palette[j]
+        const d = (a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2
+        if (d < bestDist) {
+          bestDist = d
+          bestI = i
+          bestJ = j
+        }
+      }
+    }
+    if (bestI < 0) break
+    palette[bestI] = average([palette[bestI], palette[bestJ]])
+    palette.splice(bestJ, 1)
+  }
   const nearest = new Map<number, number>()
   for (const [key, e] of counts) {
     let best = 0
