@@ -4,7 +4,7 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "es2023",
     "module": "esnext",
-    "types": ["svelte", "vite/client", "@webgpu/types"],
+    "types": ["svelte", "vite/client", "@webgpu/types", "vite-plugin-pwa/client", "vite-plugin-pwa/pwa-assets"],
     "allowArbitraryExtensions": true,
     "noEmit": true,
     /**

@@ -250,7 +250,7 @@ fn fragmentMain(in: VertexOutput) -> @location(0) vec4f {
 
 export async function createRenderer(
   canvas: HTMLCanvasElement,
-  fontJsonUrl = '/font/ya-hei-ascii-msdf.json',
+  fontJsonUrl = 'font/ya-hei-ascii-msdf.json',
 ): Promise<WebGPURenderer> {
   if (!navigator.gpu) {
     throw new Error('WebGPU is not supported in this browser.')
