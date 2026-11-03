@@ -6,17 +6,22 @@
 
   let {
     palette,
+    progress = [],
     selected = $bindable(null),
-  }: { palette: Rgb[]; selected?: number | null } = $props()
+  }: { palette: Rgb[]; progress?: number[]; selected?: number | null } = $props()
 
   let page = $state(0)
 
   const pageCount = $derived(Math.ceil(palette.length / PAGE_SIZE))
   const slots = $derived(
-    palette.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((color, i) => ({
-      color,
-      index: page * PAGE_SIZE + i,
-    })),
+    palette.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((color, i) => {
+      const index = page * PAGE_SIZE + i
+      return {
+        color,
+        index,
+        ratio: progress[index] ?? 0,
+      }
+    }),
   )
 
   $effect(() => {
@@ -58,7 +63,7 @@
       </button>
     {/if}
     <div class="swatches">
-      {#each slots as { color, index } (index)}
+      {#each slots as { color, index, ratio } (index)}
         <button
           class="swatch"
           class:selected={selected === index}
@@ -68,6 +73,16 @@
           aria-pressed={selected === index}
           onclick={() => (selected = index)}
         >
+          {#if selected === index}
+            <svg class="ring" viewBox="0 0 48 48" aria-hidden="true">
+              <path
+                class="fill"
+                d="M 24 2 H 46 V 46 H 2 V 2 Z"
+                pathLength="1"
+                stroke-dasharray="{ratio} 1"
+              />
+            </svg>
+          {/if}
           {index}
         </button>
       {/each}
@@ -97,7 +112,6 @@
     background: #fff;
     box-shadow: 0 2px 16px rgba(0, 0, 0, 0.25);
     display: flex;
-    gap: 8px;
     padding: 10px;
   }
 
@@ -105,7 +119,6 @@
     flex: 1;
     max-width: 360px;
     display: grid;
-    gap: 8px;
     grid-template-columns: repeat(5, 1fr);
   }
 
@@ -120,16 +133,25 @@
   }
 
   .swatch {
+    position: relative;
     aspect-ratio: 1;
-    border-radius: 8px;
     font-size: 14px;
     font-weight: 600;
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
   }
 
-  .swatch.selected {
-    outline: 3px solid #111;
-    outline-offset: 2px;
+  .ring {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  .ring path {
+    fill: none;
+    stroke: #888;
+    stroke-width: 4;
   }
 
   .nav {

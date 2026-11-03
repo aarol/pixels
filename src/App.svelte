@@ -4,8 +4,9 @@
   import type { Rgb } from './lib/quantize'
 
   let palette = $state.raw<Rgb[]>([])
+  let progress = $state.raw<number[]>([])
   let selected = $state<number | null>(null)
 </script>
 
-<PixelCanvas src="place2022.png" numColors={100} bind:palette {selected} />
-<Palette {palette} bind:selected />
+<PixelCanvas src="test.png" numColors={100} bind:palette bind:progress {selected} />
+<Palette {palette} {progress} bind:selected />

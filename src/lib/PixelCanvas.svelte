@@ -9,8 +9,15 @@
     src,
     numColors,
     palette = $bindable([]),
+    progress = $bindable([]),
     selected = null,
-  }: { src: string; numColors: number; palette?: Rgb[]; selected?: number | null } = $props()
+  }: {
+    src: string
+    numColors: number
+    palette?: Rgb[]
+    progress?: number[]
+    selected?: number | null
+  } = $props()
 
   const MAX_CELL = 80
   const PAD = 24
@@ -22,6 +29,8 @@
 
   let indices: Uint16Array = new Uint16Array(0)
   let filled: Uint8Array = new Uint8Array(0)
+  let totals: Uint32Array = new Uint32Array(0)
+  let counts: Uint32Array = new Uint32Array(0)
   let imgW = 0
   let imgH = 0
 
@@ -216,11 +225,19 @@
     const idx = quantized.indices
     const pal = quantized.palette
     const currentFilled = new Uint8Array(idx.length)
+    const currentTotals = new Uint32Array(pal.length)
+    const currentCounts = new Uint32Array(pal.length)
+    for (let i = 0; i < idx.length; i++) {
+      currentTotals[idx[i]]++
+    }
 
     const sizeChanged = w !== imgW || h !== imgH
     palette = pal
+    progress = new Array(pal.length).fill(0)
     indices = idx
     filled = currentFilled
+    totals = currentTotals
+    counts = currentCounts
     storageKey = key
     imgW = w
     imgH = h
@@ -237,8 +254,14 @@
     loadProgress(key).then((saved) => {
       if (cancelled || !saved || saved.length !== currentFilled.length) return
       for (let i = 0; i < saved.length; i++) {
-        if (saved[i]) currentFilled[i] = 1
+        if (saved[i]) {
+          currentFilled[i] = 1
+          currentCounts[idx[i]]++
+        }
       }
+      progress = Array.from(currentTotals, (total, c) =>
+        total > 0 ? currentCounts[c] / total : 1,
+      )
       renderer?.setFilled(currentFilled)
       schedule()
     })
@@ -283,7 +306,12 @@
   function paintCell(x: number, y: number) {
     if (!isColorable(x, y)) return false
     const i = y * imgW + x
+    const c = indices[i]
     filled[i] = 1
+    counts[c]++
+    const next = progress.slice()
+    next[c] = totals[c] > 0 ? counts[c] / totals[c] : 1
+    progress = next
     renderer?.paintCell(x, y)
     schedule()
     queueSave()
@@ -419,10 +447,5 @@
     width: 100%;
     height: 100%;
     touch-action: none;
-    cursor: grab;
-  }
-
-  canvas:active {
-    cursor: grabbing;
   }
 </style>
