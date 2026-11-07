@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Confetti } from 'svelte-confetti'
   import { quantize, type Rgb } from './quantize'
   import { loadProgress, saveProgress } from './storage'
   import { createRenderer, type WebGPURenderer } from './webgpu'
@@ -10,12 +11,14 @@
     numColors,
     palette = $bindable([]),
     progress = $bindable([]),
+    completed = $bindable(null),
     selected = null,
   }: {
     src: string
     numColors: number
     palette?: Rgb[]
     progress?: number[]
+    completed?: number | null
     selected?: number | null
   } = $props()
 
@@ -31,8 +34,11 @@
   let filled: Uint8Array = new Uint8Array(0)
   let totals: Uint32Array = new Uint32Array(0)
   let counts: Uint32Array = new Uint32Array(0)
+  let remaining = 0
   let imgW = 0
   let imgH = 0
+
+  let allComplete = $state(false)
 
   let viewW = 0
   let viewH = 0
@@ -234,10 +240,13 @@
     const sizeChanged = w !== imgW || h !== imgH
     palette = pal
     progress = new Array(pal.length).fill(0)
+    completed = null
     indices = idx
     filled = currentFilled
     totals = currentTotals
     counts = currentCounts
+    remaining = idx.length
+    allComplete = false
     storageKey = key
     imgW = w
     imgH = h
@@ -253,12 +262,15 @@
     let cancelled = false
     loadProgress(key).then((saved) => {
       if (cancelled || !saved || saved.length !== currentFilled.length) return
+      let painted = 0
       for (let i = 0; i < saved.length; i++) {
         if (saved[i]) {
           currentFilled[i] = 1
           currentCounts[idx[i]]++
+          painted++
         }
       }
+      remaining = idx.length - painted
       progress = Array.from(currentTotals, (total, c) =>
         total > 0 ? currentCounts[c] / total : 1,
       )
@@ -309,9 +321,15 @@
     const c = indices[i]
     filled[i] = 1
     counts[c]++
+    remaining--
     const next = progress.slice()
     next[c] = totals[c] > 0 ? counts[c] / totals[c] : 1
     progress = next
+    if (counts[c] === totals[c]) completed = c
+    if (remaining === 0) {
+      allComplete = false
+      queueMicrotask(() => (allComplete = true))
+    }
     renderer?.paintCell(x, y)
     schedule()
     queueSave()
@@ -432,6 +450,18 @@
     onpointerup={onPointerEnd}
     onpointercancel={onPointerEnd}
   ></canvas>
+  {#if allComplete}
+    <div class="fullscreen-confetti">
+      <Confetti
+        x={[-5, 5]}
+        y={[0, 0.1]}
+        delay={[0, 2000]}
+        duration={3000}
+        amount={200}
+        fallDistance="100vh"
+      />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -447,5 +477,18 @@
     width: 100%;
     height: 100%;
     touch-action: none;
+  }
+
+  .fullscreen-confetti {
+    position: fixed;
+    top: -50px;
+    left: 0;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    justify-content: center;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 10;
   }
 </style>

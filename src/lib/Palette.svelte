@@ -7,8 +7,14 @@
   let {
     palette,
     progress = [],
+    completed = $bindable(null),
     selected = $bindable(null),
-  }: { palette: Rgb[]; progress?: number[]; selected?: number | null } = $props()
+  }: {
+    palette: Rgb[]
+    progress?: number[]
+    completed?: number | null
+    selected?: number | null
+  } = $props()
 
   let page = $state(0)
 
@@ -29,10 +35,12 @@
   })
 
   function nextPage() {
+    completed = null
     page = (page + 1) % pageCount
   }
 
   function prevPage() {
+    completed = null
     page = (page - 1 + pageCount) % pageCount
   }
 
