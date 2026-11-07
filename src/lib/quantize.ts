@@ -106,7 +106,7 @@ export function quantize(image: ImageData, numColors: number): Quantized {
     boxes.splice(target, 1, box.slice(0, split), box.slice(split))
   }
 
-  let palette = boxes.map(average)
+  const palette = boxes.map(average)
   while (palette.length > 1) {
     let bestI = -1
     let bestJ = -1

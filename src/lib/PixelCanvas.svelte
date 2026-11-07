@@ -3,6 +3,7 @@
   import { quantize, type Rgb } from './quantize'
   import { loadProgress, saveProgress } from './storage'
   import { createRenderer, type WebGPURenderer } from './webgpu'
+  import { SvelteMap } from 'svelte/reactivity';
 
   // numColors is expected to be between 10 and 500. The resulting palette is
   // reported back through the bindable `palette` prop.
@@ -284,7 +285,7 @@
     }
   })
 
-  const pointers = new Map<number, { x: number; y: number }>()
+  const pointers = new SvelteMap<number, { x: number; y: number }>()
   let paintingPointer: number | null = null
 
   function local(e: PointerEvent) {
