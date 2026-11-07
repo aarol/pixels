@@ -67,7 +67,11 @@ export function quantize(image: ImageData, numColors: number): Quantized {
     else counts.set(key, { r, g, b, n: 1 })
   }
 
-  const boxes: Entry[][] = [[...counts.values()]]
+  const boxes: Entry[][] = [
+    [...counts.values()].sort(
+      (a, b) => a.r - b.r || a.g - b.g || a.b - b.b,
+    ),
+  ]
   while (boxes.length < k) {
     let target = -1
     let targetSize = MIN_BOX_RANGE - 1
@@ -84,7 +88,13 @@ export function quantize(image: ImageData, numColors: number): Quantized {
     if (target < 0) break
 
     const box = boxes[target]
-    box.sort((a, b) => a[targetChannel] - b[targetChannel])
+    box.sort(
+      (a, b) =>
+        a[targetChannel] - b[targetChannel] ||
+        a.r - b.r ||
+        a.g - b.g ||
+        a.b - b.b,
+    )
     const total = box.reduce((sum, e) => sum + e.n, 0)
     let acc = 0
     let split = 1

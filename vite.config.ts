@@ -36,6 +36,6 @@ export default defineConfig({
     }),
   ],
   server: {
-    allowedHosts: ['reprints-efficient-ambien-jones.trycloudflare.com'],
+    allowedHosts: ['.trycloudflare.com'],
   },
 })
