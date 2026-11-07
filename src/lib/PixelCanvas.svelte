@@ -285,6 +285,22 @@
     }
   })
 
+  export function resetProgress() {
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = 0
+    }
+    filled.fill(0)
+    counts.fill(0)
+    remaining = indices.length
+    progress = new Array(palette.length).fill(0)
+    completed = null
+    allComplete = false
+    renderer?.setFilled(filled)
+    schedule()
+    if (storageKey) saveProgress(storageKey, filled)
+  }
+
   const pointers = new SvelteMap<number, { x: number; y: number }>()
   let paintingPointer: number | null = null
 

@@ -199,8 +199,8 @@
                     fill="none"
                     stroke="currentColor"
                     stroke-width="2.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                    stroke-linecap="square"
+                    stroke-linejoin="inherit"
                 />
             </svg>
         </button>
@@ -257,8 +257,8 @@
                     fill="none"
                     stroke="currentColor"
                     stroke-width="2.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                    stroke-linecap="square"
+                    stroke-linejoin="inherit"
                 />
             </svg>
         </button>
@@ -338,7 +338,6 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 8px;
         background: #eee;
         color: #111;
     }
@@ -366,7 +365,6 @@
             top: 50%;
             transform: translateY(-50%);
             padding-bottom: 0px;
-            border-radius: 14px;
             flex-direction: column;
         }
 
