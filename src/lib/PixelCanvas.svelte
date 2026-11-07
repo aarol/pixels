@@ -14,6 +14,7 @@
     progress = $bindable([]),
     completed = $bindable(null),
     selected = null,
+    onReady,
   }: {
     src: string
     numColors: number
@@ -21,6 +22,7 @@
     progress?: number[]
     completed?: number | null
     selected?: number | null
+    onReady?: (info: { width: number; height: number; hasSavedProgress: boolean }) => void
   } = $props()
 
   const MAX_CELL = 80
@@ -33,6 +35,7 @@
 
   let indices: Uint16Array = new Uint16Array(0)
   let filled: Uint8Array = new Uint8Array(0)
+  let displayFilled: Uint8Array | null = null
   let totals: Uint32Array = new Uint32Array(0)
   let counts: Uint32Array = new Uint32Array(0)
   let remaining = 0
@@ -136,7 +139,7 @@
       }
       renderer = r
       if (imgW > 0 && imgH > 0) {
-        r.setImage(imgW, imgH, palette, indices, filled)
+        r.setImage(imgW, imgH, palette, indices, displayFilled ?? filled)
       }
       schedule()
     })
@@ -252,31 +255,30 @@
     imgW = w
     imgH = h
 
-    renderer?.setImage(w, h, pal, idx, currentFilled)
-
-    if (sizeChanged) fitted = false
-    if (viewW > 0) {
-      if (!fitted) fit()
-      schedule()
-    }
-
     let cancelled = false
     loadProgress(key).then((saved) => {
-      if (cancelled || !saved || saved.length !== currentFilled.length) return
+      if (cancelled) return
       let painted = 0
-      for (let i = 0; i < saved.length; i++) {
-        if (saved[i]) {
-          currentFilled[i] = 1
-          currentCounts[idx[i]]++
-          painted++
+      if (saved && saved.length === currentFilled.length) {
+        for (let i = 0; i < saved.length; i++) {
+          if (saved[i]) {
+            currentFilled[i] = 1
+            currentCounts[idx[i]]++
+            painted++
+          }
         }
+        remaining = idx.length - painted
+        progress = Array.from(currentTotals, (total, c) =>
+          total > 0 ? currentCounts[c] / total : 1,
+        )
       }
-      remaining = idx.length - painted
-      progress = Array.from(currentTotals, (total, c) =>
-        total > 0 ? currentCounts[c] / total : 1,
-      )
-      renderer?.setFilled(currentFilled)
-      schedule()
+      onReady?.({ width: w, height: h, hasSavedProgress: painted > 0 })
+      renderer?.setImage(w, h, pal, idx, displayFilled ?? currentFilled)
+      if (sizeChanged) fitted = false
+      if (viewW > 0) {
+        if (!fitted) fit()
+        schedule()
+      }
     })
 
     return () => {
@@ -284,6 +286,12 @@
       flushSave()
     }
   })
+
+  export function setDisplayFilled(data?: Uint8Array) {
+    displayFilled = data ?? null
+    renderer?.setFilled(displayFilled ?? filled)
+    schedule()
+  }
 
   export function resetProgress() {
     if (saveTimer) {
