@@ -13,8 +13,9 @@
   const images = [
     { src: 'test.png', name: 'Test Image 1', colors: 30 },
     { src: 'place2017.png', name: 'r/place 2017', colors: 16 },
+    { src: 'place2022.png', name: 'r/place 2022', colors: 32 },
   ]
-  const selectedImage = $state(images[1])
+  const selectedImage = $state(images[2])
 
   let pixelCanvas: PixelCanvas
   let introActive = $state(true)
